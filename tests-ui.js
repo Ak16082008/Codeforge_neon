@@ -23,11 +23,22 @@
 
     const panel = document.createElement('section');
     panel.className = 'pane';
+
     panel.style.cssText = `
+      position:fixed;
+      right:16px;
+      bottom:72px;
+      width:min(520px,calc(100vw - 32px));
+      height:min(460px,calc(100dvh - 110px));
+      box-sizing:border-box;
       padding:16px;
-      min-width:0;
       overflow:auto;
-      max-height:480px;
+      z-index:9998;
+      background:#0c1225;
+      border:1px solid #43f5ed;
+      border-radius:12px;
+      box-shadow:0 12px 40px #000b;
+      display:none;
     `;
 
     panel.innerHTML = `
@@ -78,7 +89,37 @@
     `;
 
     const editor = root.querySelector('.editor-pane');
-    editor.insertAdjacentElement('afterend', panel);
+    
+    document.body.appendChild(panel);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.textContent = '🧪 TEST CASES';
+
+    toggle.style.cssText = `
+      position:fixed;
+      right:16px;
+      bottom:16px;
+      z-index:9999;
+      background:#102c3a;
+      color:#43f5ed;
+      border:1px solid #43f5ed;
+      border-radius:10px;
+      padding:12px 16px;
+      font:700 12px monospace;
+      cursor:pointer;
+      box-shadow:0 6px 24px #0008;
+    `;
+
+    toggle.onclick = () => {
+      const open = panel.style.display === 'none';
+      panel.style.display = open ? 'block' : 'none';
+      toggle.textContent = open
+        ? '✕ CLOSE TESTS'
+        : '🧪 TEST CASES';
+    };
+
+    document.body.appendChild(toggle);
 
     const $ = selector => panel.querySelector(selector);
 
