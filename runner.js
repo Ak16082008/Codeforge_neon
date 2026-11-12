@@ -474,6 +474,11 @@
     }
   };
 
+  // Allow the extra-test manager to use the real runner.
+  window.CodeForgeRunner = {
+    execute,
+    normalize
+  };
   run.textContent = '▶ RUN CODE';
 
   console.log('CodeForge Neon unified runner loaded');
