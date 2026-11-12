@@ -1,50 +1,480 @@
-/* CodeForge Neon v2 runner: C++, Python, JS; sample and extra test verdicts. */
-(()=>{
-const run=document.getElementById('runBtn');if(!run)return;
-const code=document.getElementById('code'),lang=document.getElementById('language'),terminal=document.getElementById('terminal'),verdict=document.getElementById('verdict');
-const problem=(window.PROBLEMS||[]).find(p=>p.id===new URLSearchParams(location.search).get('id'));
-const samples=problem?.samples||[];
-const panel=document.createElement('div');panel.className='cf-stdin-panel';panel.innerHTML='<label for="runnerInput">⌨ STANDARD INPUT</label><textarea id="runnerInput" spellcheck="false" placeholder="Type input or choose a test case"></textarea><div class="cf-runner-note">C++ / Python execution requires an external online compiler. Code and input are sent to that service.</div>';
-document.querySelector('.output').before(panel);
-const stdin=document.getElementById('runnerInput');stdin.value=samples[0]?.input||'';
-const retry=document.createElement('button');retry.type='button';retry.id='retryBtn';retry.textContent='↻ RETRY';run.after(retry);
-const allBtn=document.createElement('button');allBtn.type='button';allBtn.id='runAllBtn';allBtn.textContent='▶ RUN ALL TESTS';retry.after(allBtn);
-const status=document.createElement('div');status.id='judgeResult';status.className='cf-judge-status';document.querySelector('.output').after(status);
-let running=false,compilers=null;const normalize=x=>String(x??'').replace(/\r/g,'').trim().split('\n').map(y=>y.trimEnd()).join('\n');
-const setStatus=(message,ok)=>{verdict.textContent=message;status.textContent=message;status.dataset.result=ok===true?'pass':ok===false?'fail':'neutral'};
-const errMsg=e=>e.name==='AbortError'?'Online compiler timed out':e.message;
-const timeoutFetch=async(url,options={})=>{const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),25000);try{return await fetch(url,{...options,signal:ctrl.signal})}finally{clearTimeout(timer)}};
-async function wandbox(source,input,language){
- if(!compilers){const r=await timeoutFetch('https://wandbox.org/api/list.json');if(!r.ok)throw Error('Wandbox compiler list HTTP '+r.status);compilers=await r.json()}
- const choices=compilers.filter(c=>c.language===(language==='cpp'?'C++':'Python'));
- const choice=language==='cpp'?(choices.find(c=>c.name==='gcc-head')||choices.find(c=>c.name.startsWith('gcc-'))):(choices.find(c=>c.name.startsWith('cpython-'))||choices.find(c=>/python/i.test(c.name)));
- if(!choice)throw Error('No compatible compiler found');
- const r=await timeoutFetch('https://wandbox.org/api/compile.json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({compiler:choice.name,code:source,stdin:input,save:false})});
- if(!r.ok)throw Error('Wandbox HTTP '+r.status);const d=await r.json();return {output:d.program_output||'',errors:[d.compiler_error,d.compiler_message,d.program_error,d.program_message].filter(Boolean).join('\n'),status:String(d.status??'0'),engine:'Wandbox / '+choice.name};
-}
-async function piston(source,input,language){
- const r=await timeoutFetch('https://emkc.org/api/v2/piston/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({language:language==='cpp'?'c++':'python',version:'*',files:[{content:source}],stdin:input,run_timeout:10000,compile_timeout:10000})});
- if(!r.ok)throw Error('Piston HTTP '+r.status);const d=await r.json();return {output:d.run?.stdout||'',errors:[d.compile?.stderr,d.run?.stderr].filter(Boolean).join('\n'),status:String(d.run?.code??d.compile?.code??0),engine:'Piston'};
-}
-function javascript(source,input){return new Promise((resolve,reject)=>{
- const workerSrc=`self.onmessage=e=>{let lines=e.data.input.split(/\\r?\\n/),idx=0,out=[];const readline=()=>lines[idx++]??'';const print=(...a)=>out.push(a.join(' '));const console={log:print,error:print};try{new Function('readline','print','console',e.data.source)(readline,print,console);postMessage({output:out.join('\\n')})}catch(error){postMessage({error:String(error)})}}`;
- const url=URL.createObjectURL(new Blob([workerSrc],{type:'text/javascript'})),worker=new Worker(url);let done=false;
- const timer=setTimeout(()=>finish(new Error('JavaScript exceeded 3 seconds')),3000);
- function finish(err,data){if(done)return;done=true;clearTimeout(timer);worker.terminate();URL.revokeObjectURL(url);err?reject(err):resolve({output:data.output,errors:'',status:'0',engine:'Browser JavaScript'})}
- worker.onmessage=e=>e.data.error?finish(new Error(e.data.error)):finish(null,e.data);worker.onerror=e=>finish(new Error(e.message));worker.postMessage({source,input});
-})}
-async function execute(source,input,language){if(language==='javascript')return javascript(source,input);let first;try{const r=await wandbox(source,input,language);if(/Resource temporarily unavailable/i.test(r.errors))throw Error(r.errors);return r}catch(e){first=e}try{return await piston(source,input,language)}catch(e){throw Error('Online compilers unavailable. Wandbox: '+errMsg(first)+'; Piston: '+errMsg(e)+'. Try again later or run locally.')}}
-function success(r){return r.status==='0'&&!r.errors.match(/(?:error:|traceback|resource temporarily unavailable)/i)}
-function chosenTest(){return window.CodeForgeTests?.selected?.()||null}
-async function runOne(){if(running)return;running=true;run.disabled=retry.disabled=allBtn.disabled=true;setStatus('RUNNING…',null);terminal.textContent='Running…';try{
- const input=stdin.value,t=chosenTest(),isChosen=t&&normalize(t.input)===normalize(input),sample=samples.find(s=>normalize(s.input)===normalize(input));
- const expected=isChosen?t.expected:sample?.output;
- const r=await execute(code.value,input,lang.value);const passed=success(r)&&expected!==undefined&&normalize(r.output)===normalize(expected);
- terminal.textContent='ENGINE: '+r.engine+'\n\nOUTPUT:\n'+(r.output||'(empty)')+(r.errors?'\n\nERRORS:\n'+r.errors:'')+(expected!==undefined?'\n\nEXPECTED:\n'+expected:'');
- setStatus(!success(r)?'✕ COMPILATION / RUNTIME ERROR':expected===undefined?'EXECUTED — CUSTOM INPUT':passed?'✓ TEST PASSED':'✕ WRONG ANSWER',success(r)?expected===undefined?null:passed:false);
- }catch(e){terminal.textContent=errMsg(e);setStatus('✕ RUN FAILED',false)}finally{running=false;run.disabled=retry.disabled=allBtn.disabled=false}}
-async function runAll(){if(running)return;running=true;run.disabled=retry.disabled=allBtn.disabled=true;const cases=window.CodeForgeTests?.all?.()||samples.map(s=>({input:s.input,expected:s.output}));if(!cases.length){terminal.textContent='No tests available';running=false;run.disabled=retry.disabled=allBtn.disabled=false;return}
- let passed=0,failed=0;const log=[];try{for(let i=0;i<cases.length;i++){setStatus('TEST '+(i+1)+' / '+cases.length,null);const t=cases[i];try{const r=await execute(code.value,t.input,lang.value);const ok=success(r)&&normalize(r.output)===normalize(t.expected);ok?passed++:failed++;log.push((ok?'✓':'✕')+' TEST '+(i+1)+(ok?' PASSED':' FAILED')+(ok?'':'\n  Expected: '+t.expected+'\n  Actual: '+r.output+(r.errors?'\n  Errors: '+r.errors:'')))}catch(e){failed++;log.push('✕ TEST '+(i+1)+' ERROR: '+errMsg(e));if(/Online compilers unavailable/.test(e.message)){log.push('Stopped because compiler services are unavailable.');break}}terminal.textContent=log.join('\n\n')}setStatus(passed+' PASSED · '+failed+' FAILED',failed===0&&passed===cases.length)}finally{running=false;run.disabled=retry.disabled=allBtn.disabled=false}}
-// The legacy ide.js has its own Run listener. Capture phase prevents it from executing twice.
-run.addEventListener('click',e=>{e.stopImmediatePropagation();runOne()},true);retry.onclick=runOne;allBtn.onclick=runAll;run.textContent='▶ RUN CODE';setStatus('READY',null);
+
+/* CodeForge Neon - Unified Runner */
+(() => {
+  const $ = id => document.getElementById(id);
+  const run = $('runBtn');
+  if (!run || !document.querySelector('.output')) return;
+
+  const code = $('code');
+  const lang = $('language');
+  const terminal = $('terminal');
+  const verdict = $('verdict');
+  const problemId = new URLSearchParams(location.search).get('id');
+  const problem = (window.PROBLEMS || []).find(p => p.id === problemId);
+  const samples = problem?.samples || [];
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .editor-pane {
+      display:flex!important;
+      flex-direction:column!important;
+      min-height:0!important;
+      height:100%!important;
+      overflow-y:auto!important;
+      overflow-x:hidden!important;
+    }
+    .editor-pane .editor-area {
+      flex:1 0 180px!important;
+      min-height:180px!important;
+    }
+    .editor-pane .output {
+      flex-shrink:0!important;
+      min-height:130px!important;
+      overflow:visible!important;
+    }
+    .cf-stdin-panel {
+      flex-shrink:0!important;
+      padding:14px!important;
+      border-top:1px solid #30405c;
+    }
+    .cf-stdin-panel textarea {
+      box-sizing:border-box;
+      display:block;
+      width:100%;
+      min-height:110px;
+      resize:vertical;
+      padding:12px;
+      margin-top:10px;
+      background:#090e20;
+      color:#e0efff;
+      border:1px solid #41617d;
+      border-radius:8px;
+      font:13px monospace;
+    }
+    .cf-test-actions {
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+    .cf-test-actions button {
+      padding:9px 12px;
+      border:1px solid #45e6e0;
+      border-radius:6px;
+      background:#102639;
+      color:#45e6e0;
+      cursor:pointer;
+    }
+    @media(max-width:900px) {
+      .editor-pane {
+        height:auto!important;
+        max-height:none!important;
+        overflow:visible!important;
+      }
+      .editor-pane .editor-area {
+        min-height:230px!important;
+      }
+      .editor-pane .editor-toolbar {
+        flex-wrap:wrap!important;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+
+  const panel = document.createElement('section');
+  panel.className = 'cf-stdin-panel';
+  panel.innerHTML = `
+    <label for="cfStdin" style="color:#45e6e0;font-weight:bold">
+      ⌨ STANDARD INPUT
+    </label>
+    <textarea id="cfStdin" spellcheck="false"
+      placeholder="Enter input here..."></textarea>
+    <div class="cf-test-actions">
+      <button id="cfSample" type="button">LOAD SAMPLE</button>
+      <button id="cfRetry" type="button">↻ RETRY TEST</button>
+      <button id="cfAll" type="button">▶ RUN ALL SAMPLES</button>
+    </div>
+    <div style="margin-top:9px;color:#91a0b9;font-size:11px">
+      C++ / Python use an external compiler service.
+      JavaScript runs in an isolated browser worker.
+    </div>
+  `;
+  document.querySelector('.output').before(panel);
+
+  const stdin = $('cfStdin');
+  stdin.value = samples[0]?.input || '';
+
+  const normalize = value =>
+    String(value ?? '')
+      .replace(/\r/g, '')
+      .trim()
+      .split('\n')
+      .map(x => x.trimEnd())
+      .join('\n');
+
+  const setStatus = (message, success) => {
+    verdict.textContent = message;
+    verdict.style.color =
+      success === true ? '#56edb3' :
+      success === false ? '#ff7595' : '#f7d080';
+  };
+
+  $('cfSample').onclick = () => {
+    stdin.value = samples[0]?.input || '';
+  };
+
+  // The original editor's LOAD SAMPLE button
+  // updates our visible input box as well.
+  $('sampleBtn')?.addEventListener('click', () => {
+    stdin.value = samples[0]?.input || '';
+  });
+
+  function browserWorker() {
+    self.onmessage = event => {
+      const { source, input } = event.data;
+      const lines = input.split(/\r?\n/);
+      let cursor = 0;
+      let output = '';
+
+      const write = value => {
+        output += String(value);
+      };
+
+      const readline = () => lines[cursor++] ?? '';
+      const print = (...args) => {
+        write(args.join(' ') + '\n');
+      };
+
+      const console = {
+        log: print,
+        error: print,
+        warn: print
+      };
+
+      const fs = {
+        readFileSync(fd, encoding) {
+          if (fd !== 0 && fd !== '/dev/stdin')
+            throw Error('Only standard input is supported');
+          return input;
+        }
+      };
+
+      const require = name => {
+        if (name === 'fs' || name === 'node:fs')
+          return fs;
+        throw Error(
+          'Node module "' + name +
+          '" is unavailable in browser mode'
+        );
+      };
+
+      const process = {
+        stdin: {
+          fd: 0
+        },
+        stdout: {
+          write
+        },
+        stderr: {
+          write
+        },
+        exit(code = 0) {
+          throw { cfExit: true, code };
+        }
+      };
+
+      try {
+        const execute = new Function(
+          'require',
+          'process',
+          'readline',
+          'print',
+          'console',
+          source
+        );
+
+        execute(require, process, readline, print, console);
+
+        self.postMessage({ output });
+      } catch (error) {
+        if (error?.cfExit && error.code === 0) {
+          self.postMessage({ output });
+        } else {
+          self.postMessage({
+            error: String(error?.stack || error),
+            output
+          });
+        }
+      }
+    };
+  }
+
+  async function runJavaScript(source, input) {
+    const workerSource =
+      '(' + browserWorker.toString() + ')()';
+
+    const url = URL.createObjectURL(
+      new Blob([workerSource], {
+        type: 'text/javascript'
+      })
+    );
+
+    const worker = new Worker(url);
+
+    return new Promise((resolve, reject) => {
+      let finished = false;
+
+      const finish = (error, data) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        worker.terminate();
+        URL.revokeObjectURL(url);
+        error ? reject(error) : resolve(data);
+      };
+
+      const timer = setTimeout(() => {
+        finish(Error('Time limit exceeded (5 seconds)'));
+      }, 5000);
+
+      worker.onmessage = event => {
+        const data = event.data;
+        if (data.error) {
+          finish(Error(data.error));
+        } else {
+          finish(null, data.output);
+        }
+      };
+
+      worker.onerror = event => {
+        finish(Error(event.message || 'Worker error'));
+      };
+
+      worker.postMessage({ source, input });
+    });
+  }
+
+  let compilerList = null;
+
+  async function runOnline(source, input, language) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      45000
+    );
+
+    try {
+      if (!compilerList) {
+        const response = await fetch(
+          'https://wandbox.org/api/list.json',
+          { signal: controller.signal }
+        );
+        if (!response.ok)
+          throw Error('Compiler list HTTP ' + response.status);
+
+        compilerList = await response.json();
+      }
+
+      const choices = compilerList.filter(c =>
+        c.language === (
+          language === 'cpp' ? 'C++' : 'Python'
+        )
+      );
+
+      const preferred = language === 'cpp'
+        ? choices.find(c => c.name === 'gcc-head') ||
+          choices.find(c => c.name.startsWith('gcc-'))
+        : choices.find(c => c.name.startsWith('cpython-')) ||
+          choices.find(c => /python/i.test(c.name));
+
+      const compiler = preferred || choices[0];
+
+      if (!compiler)
+        throw Error('No compiler available for ' + language);
+
+      const response = await fetch(
+        'https://wandbox.org/api/compile.json',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            compiler: compiler.name,
+            code: source,
+            stdin: input,
+            save: false
+          }),
+          signal: controller.signal
+        }
+      );
+
+      if (!response.ok)
+        throw Error('Compiler HTTP ' + response.status);
+
+      const result = await response.json();
+
+      const errors = [
+        result.compiler_error,
+        result.program_error
+      ].filter(Boolean).join('\n');
+
+      const messages = [
+        result.compiler_message,
+        result.program_message
+      ].filter(Boolean).join('\n');
+
+      const status = Number(result.status ?? 0);
+
+      if (errors || status !== 0) {
+        throw Error(
+          errors || messages ||
+          'Process exited with code ' + status
+        );
+      }
+
+      return result.program_output || '';
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function execute(input, expected = null) {
+    const language = lang.value;
+    const source = code.value;
+
+    setStatus('RUNNING...', null);
+
+    let output;
+
+    try {
+      if (language === 'javascript') {
+        output = await runJavaScript(source, input);
+      } else {
+        output = await runOnline(source, input, language);
+      }
+
+      let report = 'YOUR OUTPUT:\n' +
+        (output || '(empty)');
+
+      if (expected !== null) {
+        const passed =
+          normalize(output) === normalize(expected);
+
+        report += '\n\nEXPECTED OUTPUT:\n' + expected;
+        report += '\n\n' +
+          (passed ? '✓ PASSED' : '✕ WRONG ANSWER');
+
+        setStatus(
+          passed ? 'SAMPLE PASSED' : 'SAMPLE FAILED',
+          passed
+        );
+
+        terminal.textContent = report;
+        return passed;
+      }
+
+      setStatus('EXECUTED', true);
+      terminal.textContent = report;
+      return true;
+
+    } catch (error) {
+      const message = String(error.message || error);
+
+      const serviceError =
+        /catatonit|failed to exec pid1|resource temporarily unavailable|failed to fetch|networkerror|compiler http|compiler list http|aborterror/i
+          .test(message);
+
+      setStatus(
+        serviceError ? 'COMPILER SERVICE ERROR' : 'EXECUTION ERROR',
+        false
+      );
+
+      terminal.textContent =
+        (serviceError
+          ? 'The online compiler service failed.\n'
+          : 'Your program could not execute.\n') +
+        '\nDETAILS:\n' + message;
+
+      return false;
+    }
+  }
+
+  async function runSelected() {
+    run.disabled = true;
+
+    try {
+      const input = stdin.value;
+      const sample = samples.find(s =>
+        normalize(s.input) === normalize(input)
+      );
+
+      await execute(
+        input,
+        sample ? sample.output : null
+      );
+    } finally {
+      run.disabled = false;
+      run.textContent = '▶ RUN CODE';
+    }
+  }
+
+  // Override the old JavaScript-only handler.
+  run.addEventListener('click', event => {
+    event.stopImmediatePropagation();
+    runSelected();
+  }, true);
+
+  $('cfRetry').onclick = runSelected;
+
+  $('cfAll').onclick = async () => {
+    if (!samples.length) {
+      terminal.textContent = 'No official samples available.';
+      return;
+    }
+
+    $('cfAll').disabled = true;
+    const results = [];
+    let passed = 0;
+
+    try {
+      for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i];
+        const ok = await execute(
+          sample.input,
+          sample.output
+        );
+
+        if (ok) passed++;
+
+        results.push(
+          'Test ' + (i + 1) + ': ' +
+          (ok ? 'PASSED' : 'FAILED')
+        );
+
+        if (!ok) {
+          results.push('\n' + terminal.textContent);
+          break;
+        }
+      }
+
+      terminal.textContent =
+        results.join('\n') +
+        '\n\nPassed ' + passed +
+        ' / ' + samples.length + ' official samples';
+
+      setStatus(
+        passed === samples.length
+          ? 'ALL SAMPLES PASSED'
+          : 'SOME TESTS FAILED',
+        passed === samples.length
+      );
+    } finally {
+      $('cfAll').disabled = false;
+    }
+  };
+
+  run.textContent = '▶ RUN CODE';
+
+  console.log('CodeForge Neon unified runner loaded');
 })();
