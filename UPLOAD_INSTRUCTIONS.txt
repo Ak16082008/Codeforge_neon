@@ -1,0 +1,16 @@
+CODEFORGE NEON — DATABASE UPDATE
+
+This package adds the SQLite problem archive to your existing repository.
+Do NOT delete your existing index.html, app.js, ide.js, runner.js, style.css, ui.js or ui.css.
+
+Recommended on Windows (Git installed):
+1. Open PowerShell in your Codeforge_neon repository folder.
+2. Extract this ZIP somewhere.
+3. Copy data.js, problem.html, problem-loader.js and the whole data/ folder into the repository root.
+4. Run: git add data.js problem.html problem-loader.js data
+5. Run: git commit -m "Load full Codeforces archive"
+6. Run: git push
+7. Wait for GitHub Pages to deploy; refresh the website.
+
+The 87 failed problems remain visible in the archive, but cannot open their statements.
+IMPORTANT: If you already changed problem.html, back it up first.
